@@ -3,6 +3,7 @@ package com.microservicedemo.orderservice.service;
 import com.microservicedemo.orderservice.dto.InventoryResponse;
 import com.microservicedemo.orderservice.dto.OrderLineItemsDto;
 import com.microservicedemo.orderservice.dto.OrderRequest;
+import com.microservicedemo.orderservice.event.OrderPlacedEvent;
 import com.microservicedemo.orderservice.model.Order;
 import com.microservicedemo.orderservice.model.OrderLineItems;
 import com.microservicedemo.orderservice.repository.OrderRepository;
@@ -10,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.springframework.cloud.sleuth.Span;
 import org.springframework.cloud.sleuth.Tracer;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -26,6 +28,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
     private final Tracer tracer; // create own span id
+    private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
 
     public String placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
@@ -45,6 +48,7 @@ public class OrderService {
         // add own span name
         Span inventoryServiceLookup = tracer.nextSpan().name("InventoryServiceLookup"); 
         try(Tracer.SpanInScope spanInScope = tracer.withSpan(inventoryServiceLookup.start())){
+            inventoryServiceLookup.tag("call", "inventory-service");
             /*
             * Call inventory service
             * and place order when product is in stock
@@ -64,6 +68,7 @@ public class OrderService {
             
             if(allProductsInStock) {
                 orderRepository.save(order);
+                kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()));
                 return "Order Placed Successfully";
             } else{
                 throw new IllegalArgumentException("Product not in stock.");
